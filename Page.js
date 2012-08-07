@@ -205,7 +205,7 @@ _.extend(Page.prototype, Backbone.Events, {
     return this;
   },
 
-  render : function(req, res, next){
+  render : function(req, res, next, callback){
     var renderData = {};
 
     if(this.attributes.variables)
@@ -227,21 +227,70 @@ _.extend(Page.prototype, Backbone.Events, {
       renderData.stylesheets = results[1].join("\n");
       renderData.views = results[2];
 
-      res.render(page.attributes.content, renderData, function(err, bodyData){
-        if(err) 
-          throw err;
+      var nestedPages = [];
 
-        if(page.attributes.layout) {
-          renderData.content = bodyData;
-          res.render(page.attributes.layout, renderData);
+      var getNestedPagesResponse = function(finished) {
+        if(nestedPages.length > 0) {
+          var obj = nestedPages.pop();
+          obj.page.render(req, res, next, function(data) {
+            renderData[obj.name] = data;
+            getNestedPagesResponse(finished);
+          });
+        } else {
+          finished();
         }
-        else
-          res.send(bodyData);
-      });  
+      }
+
+      var renderContent = function() {
+        res.render(page.attributes.content, renderData, function(err, bodyData){
+
+          if(err) {
+            throw err;
+          }
+
+          var checkForLayoutAttribute = function() {
+            if(page.attributes.layout) {
+              renderData.content = bodyData;
+              res.render(page.attributes.layout, renderData, function(err, html) {
+                if(err) {
+                  throw err;
+                } else {
+                  sendResponse(html);
+                }
+              });
+            } else {
+              sendResponse(bodyData);
+            }
+          };
+          var sendResponse = function(data) {          
+            if(callback) {
+              callback(data);
+            } else {
+              res.send(data);
+            }
+          };
+          
+          checkForLayoutAttribute();
+
+        });
+      };
+
+      if(page.attributes.childs) {
+        for(var name in page.attributes.childs) {
+          nestedPages.push({
+            name: name,
+            page: page.attributes.childs[name]
+          });
+        }
+        getNestedPagesResponse(renderContent);
+      } else {
+        renderContent();
+      }
+        
     })
     
     return this;
-  }
+  },
 
 });
 
